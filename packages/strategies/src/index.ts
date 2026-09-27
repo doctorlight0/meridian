@@ -8,6 +8,8 @@ export const STRATEGY_ENGINE = {
   version: "0.1.0",
 };
 
+export * from "./types";
+export * from "./feeds";
 export * from "./rng";
 export * from "./decimal";
 export * from "./gbm";
