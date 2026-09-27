@@ -3,7 +3,12 @@ export interface StrategyEngine {
   readonly version: string;
 }
 
-export const STRATEGY_ENGINE: StrategyEngine = {
+export const STRATEGY_ENGINE = {
   name: "meridian-strategies",
   version: "0.1.0",
 };
+
+export * from "./rng";
+export * from "./decimal";
+export * from "./gbm";
+export * from "./price-feed";
