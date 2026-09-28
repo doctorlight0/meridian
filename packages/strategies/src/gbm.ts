@@ -1,5 +1,13 @@
 import { XorShift64 } from "./rng";
+import { FixedPointDecimal } from "./types";
 import { parseDecimal } from "./decimal";
+
+function toNumber(value: string | number | FixedPointDecimal): number {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return parseDecimal(value);
+  if (value instanceof FixedPointDecimal) return Number(value.toString());
+  return parseDecimal(String(value));
+}
 
 export function derivePathSeed(seed: bigint, pathIndex: number): bigint {
   return seed ^ (BigInt(pathIndex) * 0x9e3779b97f4a7c15n);
@@ -7,14 +15,14 @@ export function derivePathSeed(seed: bigint, pathIndex: number): bigint {
 
 export function generatePath(
   startPrice: string | number,
-  drift: string | number,
-  volatility: string | number,
+  drift: string | number | FixedPointDecimal,
+  volatility: string | number | FixedPointDecimal,
   steps: number,
   seed: bigint
 ): number[] {
   const sp = typeof startPrice === "string" ? parseDecimal(startPrice) : startPrice;
-  const d = typeof drift === "string" ? parseDecimal(drift) : drift;
-  const v = typeof volatility === "string" ? parseDecimal(volatility) : volatility;
+  const d = toNumber(drift);
+  const v = toNumber(volatility);
 
   const rng = new XorShift64(seed);
   const path: number[] = [];
@@ -58,8 +66,8 @@ export function generatePath(
 
 export function generateBatch(
   startPrice: string | number,
-  drift: string | number,
-  volatility: string | number,
+  drift: string | number | FixedPointDecimal,
+  volatility: string | number | FixedPointDecimal,
   steps: number,
   count: number,
   seed: bigint

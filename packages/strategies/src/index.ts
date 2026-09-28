@@ -13,4 +13,5 @@ export * from "./feeds";
 export * from "./rng";
 export * from "./decimal";
 export * from "./gbm";
-export * from "./price-feed";
+export type { PricePoint } from "./price-feed";
+export { SimplePriceFeed, createPriceFeedFromPath } from "./price-feed";

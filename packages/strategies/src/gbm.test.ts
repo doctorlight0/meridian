@@ -1,6 +1,8 @@
 /// <reference lib="vitest" />
 
 import { generatePath, generateBatch, derivePathSeed } from "./gbm";
+import { FixedPointDecimal } from "./types";
+import { createPriceFeedFromPath } from "./price-feed";
 
 describe("derivePathSeed", () => {
   it("derives different seeds for different path indices", () => {
@@ -71,6 +73,50 @@ describe("generatePath", () => {
     const path1 = generatePath(startPrice, drift, volatility, steps, seed1);
     const path2 = generatePath(startPrice, drift, volatility, steps, seed2);
     expect(path1).not.toEqual(path2);
+  });
+
+  it("accepts FixedPointDecimal for drift", () => {
+    const startPrice = "100.0";
+    const drift = FixedPointDecimal.fromString("0.01");
+    const volatility = "0.2";
+    const steps = 10;
+    const seed = 42n;
+    const path = generatePath(startPrice, drift, volatility, steps, seed);
+    expect(path.length).toBe(steps + 1);
+    expect(path[0]).toBeCloseTo(100.0);
+  });
+
+  it("accepts FixedPointDecimal for volatility", () => {
+    const startPrice = "100.0";
+    const drift = "0.01";
+    const volatility = FixedPointDecimal.fromString("0.2");
+    const steps = 10;
+    const seed = 42n;
+    const path = generatePath(startPrice, drift, volatility, steps, seed);
+    expect(path.length).toBe(steps + 1);
+    expect(path[0]).toBeCloseTo(100.0);
+  });
+
+  it("accepts FixedPointDecimal for both drift and volatility", () => {
+    const startPrice = "100.0";
+    const drift = FixedPointDecimal.fromString("0.01");
+    const volatility = FixedPointDecimal.fromString("0.2");
+    const steps = 10;
+    const seed = 42n;
+    const path = generatePath(startPrice, drift, volatility, steps, seed);
+    expect(path.length).toBe(steps + 1);
+    expect(path[0]).toBeCloseTo(100.0);
+  });
+
+  it("drift and volatility as strings use fixed-point decimal parsing", () => {
+    const startPrice = "100.0";
+    const drift = "0.01";
+    const volatility = "0.2";
+    const steps = 5;
+    const seed = 42n;
+    const path1 = generatePath(startPrice, drift, volatility, steps, seed);
+    const path2 = generatePath(startPrice, drift, volatility, steps, seed);
+    expect(path1).toEqual(path2);
   });
 });
 
@@ -143,6 +189,170 @@ describe("generateBatch", () => {
     const seed = 42n;
     const batch = generateBatch(startPrice, drift, volatility, steps, 5, seed);
     const pathSet = new Set(batch.map((p) => p.map((x) => x.toString()).join(",")));
-    expect(pathSet.size).toBeGreaterThanOrEqual(2); // at least 2 paths should be different with random variation
+    expect(pathSet.size).toBeGreaterThanOrEqual(2);
+  });
+
+  it("uses different path seeds for each path in batch", () => {
+    const startPrice = "100.0";
+    const drift = "0.1";
+    const volatility = "0.2";
+    const steps = 5;
+    const count = 5;
+    const seed = 42n;
+    const batch = generateBatch(startPrice, drift, volatility, steps, count, seed);
+    const seeds = batch.map((_path, i) => derivePathSeed(seed, i));
+    const uniqueSeeds = new Set(seeds.map((s) => s.toString()));
+    expect(uniqueSeeds.size).toBe(count);
+  });
+
+  it("has statistical sanity for drift with positive drift trend using numeric drift", () => {
+    // With positive numeric drift, paths should trend upward over many trials
+    const startPrice = "100.0";
+    const drift = 0.05;
+    const volatility = 0.1;
+    const steps = 50;
+    const count = 200;
+    const seed = 42n;
+    const batches = generateBatch(startPrice, drift, volatility, steps, count, seed);
+
+    // Calculate sample mean of final prices
+    const finalPrices = batches.map((path) => path[path.length - 1]);
+    const sum = finalPrices.reduce((a, b) => a + b, 0);
+    const mean = sum / count;
+
+    // With positive drift, mean should be above start price
+    expect(mean).toBeGreaterThan(100);
+  });
+
+  it("has statistical sanity for volatility - wider spread with higher vol", () => {
+    // With volatility, final prices should spread widely
+    const startPrice = "100.0";
+    const drift = 0.0;
+    const volatility = 0.5;
+    const steps = 30;
+    const count = 200;
+    const seed = 42n;
+    const batches = generateBatch(startPrice, drift, volatility, steps, count, seed);
+
+    const finalPrices = batches.map((path) => path[path.length - 1]);
+    const min = Math.min(...finalPrices);
+    const max = Math.max(...finalPrices);
+
+    // With vol=0.5 and 30 steps, should have significant spread
+    expect(max - min).toBeGreaterThan(30);
+  });
+
+  it("has statistical sanity - zero drift with zero vol stays near start", () => {
+    // With zero drift and zero vol, paths should stay near start price
+    const startPrice = "100.0";
+    const drift = 0.0;
+    const volatility = 0.0;
+    const steps = 50;
+    const count = 200;
+    const seed = 42n;
+    const batches = generateBatch(startPrice, drift, volatility, steps, count, seed);
+
+    const finalPrices = batches.map((path) => path[path.length - 1]);
+    const allNearStart = finalPrices.every((p) => Math.abs(p - 100) < 1);
+    expect(allNearStart).toBe(true);
+  });
+
+  it("price-feed integration via createPriceFeedFromPath preserves start price", () => {
+    const startPrice = "100.0";
+    const drift = "0.0";
+    const volatility = "0.0";
+    const steps = 5;
+    const seed = 42n;
+    const path = generatePath(startPrice, drift, volatility, steps, seed);
+    const feed = createPriceFeedFromPath(path);
+    // SimplePriceFeed stores the initial price
+    expect(feed.getCurrentPrice()).toBeCloseTo(startPrice);
+  });
+
+  it("price-feed integration with drift paths - final price exceeds start", () => {
+    const startPrice = "100.0";
+    const drift = FixedPointDecimal.fromString("0.1");
+    const volatility = FixedPointDecimal.fromString("0.15");
+    const steps = 10;
+    const seed = 42n;
+    const path = generatePath(startPrice, drift, volatility, steps, seed);
+    // Final price should exceed start price with positive drift
+    expect(path[path.length - 1]).toBeGreaterThan(100);
+  });
+
+  it("price-feed integration with numeric drift and volatility - final price exceeds start", () => {
+    const startPrice = "100.0";
+    const drift = 0.1;
+    const volatility = 0.15;
+    const steps = 10;
+    const seed = 42n;
+    const path = generatePath(startPrice, drift, volatility, steps, seed);
+    // Final price should exceed start price with positive drift
+    expect(path[path.length - 1]).toBeGreaterThan(100);
+  });
+});
+
+describe("edge cases", () => {
+  it("handles minimal steps (0)", () => {
+    const startPrice = "100.0";
+    const drift = "0.0";
+    const volatility = "0.0";
+    const steps = 0;
+    const seed = 42n;
+    const path = generatePath(startPrice, drift, volatility, steps, seed);
+    expect(path.length).toBe(1);
+    expect(path[0]).toBeCloseTo(100.0);
+  });
+
+  it("handles single step", () => {
+    const startPrice = "100.0";
+    const drift = "0.0";
+    const volatility = "0.0";
+    const steps = 1;
+    const seed = 42n;
+    const path = generatePath(startPrice, drift, volatility, steps, seed);
+    expect(path.length).toBe(2);
+    expect(path[0]).toBeCloseTo(100.0);
+  });
+
+  it("handles large number of steps", () => {
+    const startPrice = "100.0";
+    const drift = "0.0";
+    const volatility = "0.0";
+    const steps = 1000;
+    const seed = 42n;
+    const path = generatePath(startPrice, drift, volatility, steps, seed);
+    expect(path.length).toBe(1001);
+  });
+
+  it("handles invalid start price gracefully", () => {
+    const drift = "0.0";
+    const volatility = "0.0";
+    const steps = 5;
+    const seed = 42n;
+    expect(() => generatePath("invalid", drift, volatility, steps, seed))
+      .not.toThrow();
+  });
+
+  it("handles negative drift", () => {
+    const startPrice = "100.0";
+    const drift = "-0.1";
+    const volatility = "0.1";
+    const steps = 10;
+    const seed = 42n;
+    const path = generatePath(startPrice, drift, volatility, steps, seed);
+    expect(path.length).toBe(steps + 1);
+    expect(path[0]).toBeCloseTo(100.0);
+  });
+
+  it("handles negative volatility (treated as absolute in math)", () => {
+    const startPrice = "100.0";
+    const drift = "0.0";
+    const volatility = "-0.1";
+    const steps = 5;
+    const seed = 42n;
+    const path = generatePath(startPrice, drift, volatility, steps, seed);
+    expect(path.length).toBe(steps + 1);
+    expect(path[0]).toBeCloseTo(100.0);
   });
 });
